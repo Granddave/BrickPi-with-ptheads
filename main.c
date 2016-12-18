@@ -1,4 +1,11 @@
+// Compile Using:
+// sudo gcc -o lab5 BrickPi.c -lrt -lm -pthread
+// Run the compiled program using
+// sudo ./lab5
+
 #define _GNU_SOURCE
+
+#define LOAD
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,10 +46,6 @@ static inline void timespec_add_us(struct timespec * t, uint64_t d)
 	t->tv_nsec = d;
 }
 
-// Compile Using:
-// sudo gcc -o lab5 BrickPi.c -lrt -lm -pthread
-// Run the compiled program using
-// sudo ./lab5
 
 pthread_t threads[threads_num];
 
@@ -56,12 +59,6 @@ struct order
 	int speed;
 	int random;
 } order_status;
-
-/* struct periodic_data {
-	int index;
-	long period_us;
-	int wcet_sim;
-}; */
 
 pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
 
@@ -96,11 +93,11 @@ int main()
 
 	result = BrickPiSetup();
 	printf("BrickPiSetup: %d\n", result);
- 	if(result)
-    {
-    	printf("Error: BrickPiSetup");
-    	return 0;
-    }
+	if(result)
+	{
+		printf("Error: BrickPiSetup");
+		return 0;
+	}
 
 	BrickPi.Address[0] = 1;
 	BrickPi.Address[1] = 2;
@@ -176,6 +173,10 @@ int main()
 			printf("US: %d\n", USensor);
 			printf("Cmd: %d\n", order_status.command);
 			printf("Random: %d\n", order_status.random);
+#ifdef LOAD
+			load();
+#endif
+
 		}
 	}
 
@@ -213,7 +214,9 @@ void *ultrasonic (void * arg)
 				pthread_mutex_unlock(&m);
 			}
 		}
-		//load();
+#ifdef LOAD
+		load();
+#endif
 	}
 
 	pthread_exit(NULL);
@@ -291,7 +294,9 @@ void *motor (void * arg)
 			}
 			pthread_mutex_unlock(&m);
 		}
+#ifdef LOAD
 		load();
+#endif
 	}
 
 	pthread_exit(NULL);
@@ -331,7 +336,9 @@ void *button (void * arg)
 			}
 
 		}
-		//load();
+#ifdef LOAD
+		load();
+#endif
 	}
   pthread_exit(NULL);
 }
@@ -361,7 +368,9 @@ void *randomThread (void * arg)
 			pthread_mutex_unlock(&m);
 
 		}
-		//load();
+#ifdef LOAD
+		load();
+#endif
 	}
   pthread_exit(NULL);
 }
@@ -387,7 +396,9 @@ void *periodic (void * arg)
 			pthread_mutex_unlock(&m);
 
 		}
-		//load();
+#ifdef LOAD
+		load();
+#endif
 	}
   pthread_exit(NULL);
 }
