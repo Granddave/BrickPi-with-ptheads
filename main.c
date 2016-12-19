@@ -114,9 +114,15 @@ int main()
 		printf("Error: BrickPiSetupSensors %d", result);
 		return 0;
 	}
+  	
+  	pthread_mutexattr_t mutexattr;
+	pthread_mutexattr_init(&mutexattr);
+	pthread_mutexattr_setprotocol(&mutexattr, PTHREAD_PRIO_INHERIT);
 
-	pthread_mutex_init(&m, 0);
-
+	pthread_mutex_init(&m, &mutexattr);
+	
+  
+  
 	pthread_attr_t attr_motor, attr_ultrasonic, attr_button, attr_random, attr_periodic;
 
 	pthread_attr_init(&attr_motor);
@@ -186,6 +192,7 @@ int main()
 	{
 		pthread_join(threads[i], NULL);
 	}
+	pthread_mutexattr_destroy(&mutexattr);
 }
 
 void *ultrasonic (void * arg)
