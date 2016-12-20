@@ -17,6 +17,7 @@
 
 #include "tick.h"
 #include "BrickPi.h"
+#include "kbhit.h"
 
 #include <linux/i2c-dev.h>
 #include <fcntl.h>
@@ -60,7 +61,9 @@ struct order
 	int random;
 } order_status;
 
-pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutexBrick = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutexOrderStatus = PTHREAD_MUTEX_INITIALIZER;
+
 
 int result 			= 0;
 int updateResult 	= 0;
@@ -73,7 +76,7 @@ int button1Pushed 	= 0;
 int button2Pushed 	= 0;
 int USensor			= 0;
 
-
+int kbhit(void);
 void *ultrasonic(void * arg);
 void *motor (void * arg);
 void *button (void * arg);
@@ -119,8 +122,9 @@ int main()
 	pthread_mutexattr_init(&mutexattr);
 	pthread_mutexattr_setprotocol(&mutexattr, PTHREAD_PRIO_INHERIT);
 
-	pthread_mutex_init(&m, &mutexattr);
-	
+	pthread_mutex_init(&mutexBrick, &mutexattr);
+	pthread_mutex_init(&mutexOrderStatus, &mutexattr);
+
   
   
 	pthread_attr_t attr_motor, attr_ultrasonic, attr_button, attr_random, attr_periodic;
@@ -163,36 +167,44 @@ int main()
 	pthread_create(&threads[3], &attr_random , randomThread, NULL);
 	pthread_create(&threads[4], &attr_periodic, periodic, NULL);
 
-	while(1)
+	while(!kbhit())
 	{
 		timespec_add_us(&interval, 10 * 1000);
-
 		clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &interval, NULL);
+		
+		
+		pthread_mutex_lock(&mutexBrick);
+		system("clear");
+		printf("updateResult: %d\n",updateResult = BrickPiUpdateValues());		
+		printf("B1: %d \tM1: %d\n", button1Pushed, BrickPi.MotorSpeed[M1_PORT]);
+		printf("B2: %d \tM2: %d\n", button2Pushed, BrickPi.MotorSpeed[M2_PORT]);
+		printf("US: %d\n", USensor);
+		
+		pthread_mutex_lock(&mutexOrderStatus);
+		printf("Cmd: %d\n", order_status.command);
+		printf("Random: %d\n", order_status.random);
+		pthread_mutex_unlock(&mutexOrderStatus);
+		pthread_mutex_unlock(&mutexBrick);
 
-		updateResult = BrickPiUpdateValues();
+		
 
-		if (!updateResult)
-		{
-			system("clear");
-			printf("B1: %d \tM1: %d\n", button1Pushed, BrickPi.MotorSpeed[M1_PORT]);
-			printf("B2: %d \tM2: %d\n", button2Pushed, BrickPi.MotorSpeed[M2_PORT]);
-			printf("US: %d\n", USensor);
-			printf("Cmd: %d\n", order_status.command);
-			printf("Random: %d\n", order_status.random);
 #ifdef LOAD
-			load();
+		load();
 #endif
 
-		}
 	}
-
+	system("clear");
+	printf("Stopping threads...\n");		
 	stop = 1;
 	int i;
 	for (i = 0; i < threads_num; i++)
 	{
+		printf("Stopping: %d\n", i);		
 		pthread_join(threads[i], NULL);
 	}
 	pthread_mutexattr_destroy(&mutexattr);
+	printf("Done.\n");		
+	return 0;
 }
 
 void *ultrasonic (void * arg)
@@ -210,17 +222,17 @@ void *ultrasonic (void * arg)
 		timespec_add_us(&next, 75 * 1000);	//75 ms
 
 		clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &next, NULL);
+		
+		pthread_mutex_lock(&mutexBrick);
 		if (!updateResult)
 		{
 			USensor = BrickPi.Sensor[US_PORT];
-
+			
 			if (USensor <= 10)
-			{
-				pthread_mutex_lock(&m);
 				order_update(6, 10, STILL, 0, 0);
-				pthread_mutex_unlock(&m);
-			}
 		}
+		pthread_mutex_unlock(&mutexBrick);
+
 #ifdef LOAD
 		load();
 #endif
@@ -243,10 +255,11 @@ void *motor (void * arg)
 	{
 		timespec_add_us(&next, 50 * 1000); //50 ms
 		clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &next, NULL);
-
+		
+		pthread_mutex_lock(&mutexBrick);
 		if(!updateResult)
 		{
-			pthread_mutex_lock(&m);
+			pthread_mutex_lock(&mutexOrderStatus);
 			if (order_status.duration > 0)
 			{
 				if (order_status.command == STILL)
@@ -299,8 +312,10 @@ void *motor (void * arg)
 				BrickPi.MotorSpeed[M2_PORT] = 0;
 				order_status.urgent_level = 0;
 			}
-			pthread_mutex_unlock(&m);
+			pthread_mutex_unlock(&mutexOrderStatus);
+
 		}
+		pthread_mutex_unlock(&mutexBrick);
 #ifdef LOAD
 		load();
 #endif
@@ -323,26 +338,19 @@ void *button (void * arg)
 	{
 		timespec_add_us(&next, 85 * 1000); //85ms
 		clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &next, NULL);
-
+		
+		pthread_mutex_lock(&mutexBrick);
 		if(!updateResult)
 		{
 			button1Pushed = BrickPi.Sensor[B1_PORT];
 			button2Pushed = BrickPi.Sensor[B2_PORT];
-
+			
 			if (button1Pushed)
-			{
-				pthread_mutex_lock(&m);
 				order_update(3, 0, BACK_THEN_RIGHT, SPEED_STD, 0);
-				pthread_mutex_unlock(&m);
-			}
 			if (button2Pushed)
-			{
-				pthread_mutex_lock(&m);
 				order_update(3, 0, BACK_THEN_LEFT, SPEED_STD, 0);
-				pthread_mutex_unlock(&m);
-			}
-
 		}
+		pthread_mutex_unlock(&mutexBrick);
 #ifdef LOAD
 		load();
 #endif
@@ -367,14 +375,11 @@ void *randomThread (void * arg)
 		timespec_add_us(&next, randomTime * 1000);
 
 		clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &next, NULL);
-
+		
+		pthread_mutex_lock(&mutexBrick);
 		if(!updateResult)
-		{
-			pthread_mutex_lock(&m);
 			order_update(2, 5000, rand() % 6, SPEED_STD, 1); //Send random cmd
-			pthread_mutex_unlock(&m);
-
-		}
+		pthread_mutex_unlock(&mutexBrick);
 #ifdef LOAD
 		load();
 #endif
@@ -396,13 +401,10 @@ void *periodic (void * arg)
 		timespec_add_us(&next, 243 * 1000);
 		clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &next, NULL);
 
+		pthread_mutex_lock(&mutexBrick);
 		if(!updateResult)
-		{
-			pthread_mutex_lock(&m);
 			order_update(1, 1000, FORWARD, SPEED_STD, 0);
-			pthread_mutex_unlock(&m);
-
-		}
+		pthread_mutex_unlock(&mutexBrick);
 #ifdef LOAD
 		load();
 #endif
@@ -416,6 +418,8 @@ void order_update(int u, int d, enum commandenum c, int s, int r)
 {
 	if (u > order_status.urgent_level)
 	{
+		pthread_mutex_lock(&mutexOrderStatus);
+
 		order_status.urgent_level = u;
 		if (c == BACK_THEN_LEFT || c == BACK_THEN_RIGHT)
 			order_status.duration = BACK_DUR;
@@ -427,6 +431,8 @@ void order_update(int u, int d, enum commandenum c, int s, int r)
 		else
 			order_status.speed = s;
 		order_status.random = r;
+
+		pthread_mutex_unlock(&mutexOrderStatus);
 	}
 }
 
